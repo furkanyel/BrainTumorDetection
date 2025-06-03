@@ -1,0 +1,71 @@
+import kagglehub
+import os
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.applications import VGG16
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Flatten, Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.applications.vgg16 import preprocess_input
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+# Kaggle'daki veri setine erişim
+path = kagglehub.dataset_download("masoudnickparvar/brain-tumor-mri-dataset")
+print("Path to dataset files:", path)
+
+
+test_yolu = os.path.join(path, "Training")
+dogrulama_yolu = os.path.join(path, "Testing")
+
+test_vgg = ImageDataGenerator(
+    preprocessing_function=preprocess_input,
+    rotation_range=10,
+    zoom_range=0.1,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    horizontal_flip=True
+)
+
+dogrulama_vgg = ImageDataGenerator(preprocessing_function=preprocess_input)
+
+train_gen = test_vgg.flow_from_directory(
+    test_yolu,
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical'
+)
+
+dogrulama_gen = dogrulama_vgg.flow_from_directory(
+    dogrulama_yolu,
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical'
+)
+
+vgg_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+
+
+for layer in vgg_model.layers:
+    layer.trainable = False
+
+# Yeni katmanları ekleme
+x = vgg_model.output
+x = Flatten()(x)
+x = Dense(128, activation='relu')(x)
+x = Dropout(0.5)(x)
+predictions = Dense(4, activation='softmax')(x)
+
+model_vgg16 = Model(inputs=vgg_model.input, outputs=predictions)
+
+model_vgg16.compile(optimizer=Adam(learning_rate=0.0001),
+                    loss='categorical_crossentropy',
+                    metrics=['accuracy'])
+
+model_vgg16.summary()
+
+history_vgg = model_vgg16.fit(
+    train_gen,
+    epochs=10,
+    validation_data=dogrulama_gen
+)
