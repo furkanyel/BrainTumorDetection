@@ -1,0 +1,177 @@
+import os
+import kagglehub
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import random
+from PIL import Image
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, classification_report
+
+
+path = kagglehub.dataset_download("masoudnickparvar/brain-tumor-mri-dataset")
+
+print("Path to dataset files:", path)
+
+train_yolu = "/kaggle/input/brain-tumor-mri-dataset/Training"
+test_yolu = "/kaggle/input/brain-tumor-mri-dataset/Testing"
+
+classes = ['glioma', 'meningioma', 'notumor', 'pituitary']
+
+def count_images(path):
+    count_dict = {}
+    for cls in classes:
+        cls_path = os.path.join(path, cls)
+        count_dict[cls] = len(os.listdir(cls_path))
+    return count_dict
+
+# Görsel sayıları
+train_counts = count_images(train_yolu)
+test_counts = count_images(test_yolu)
+
+# Eğitim seti dağılımı
+plt.figure(figsize=(10, 5))
+sns.barplot(x=list(train_counts.keys()), y=list(train_counts.values()), color='green')
+plt.title("Eğitim Seti - Görsel Dağılımı")
+plt.ylabel("Görsel Sayısı")
+plt.xlabel("Sınıflar")
+plt.show()
+
+# Test seti dağılımı
+plt.figure(figsize=(10, 5))
+sns.barplot(x=list(test_counts.keys()), y=list(test_counts.values()), color='salmon')
+plt.title("Test Seti - Görsel Dağılımı")
+plt.ylabel("Görsel Sayısı")
+plt.xlabel("Sınıflar")
+plt.show()
+
+# Örnek görseller
+plt.figure(figsize=(12, 8))
+for i, cls in enumerate(classes):
+    img_path = os.path.join(train_yolu, cls, random.choice(os.listdir(os.path.join(train_yolu, cls))))
+    img = Image.open(img_path)
+    plt.subplot(2, 2, i+1)
+    plt.imshow(img, cmap='gray')
+    plt.title(cls)
+    plt.axis('off')
+plt.suptitle("Her Sınıftan Örnek Görsel")
+plt.tight_layout()
+plt.show()
+
+# Boyut ayarlaması
+img_size = (150, 150) 
+batch_size = 32
+
+# Eğitim verileri için Data Augmentation 
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=15,
+    zoom_range=0.1,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    shear_range=0.1,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+# Test verisi için sadece normalizasyon
+test_datagen = ImageDataGenerator(rescale=1./255)
+
+
+train_generator = train_datagen.flow_from_directory(
+    directory="/kaggle/input/brain-tumor-mri-dataset/Training",
+    target_size=img_size,
+    batch_size=batch_size,
+    color_mode='grayscale',
+    class_mode='categorical',
+    shuffle=True
+)
+
+test_generator = test_datagen.flow_from_directory(
+    directory="/kaggle/input/brain-tumor-mri-dataset/Testing",
+    target_size=img_size,
+    batch_size=batch_size,
+    color_mode='grayscale',
+    class_mode='categorical',
+    shuffle=False
+)
+
+model_cnn = Sequential([
+    Conv2D(32, (3, 3), activation='relu', input_shape=(150, 150, 1)),
+    MaxPooling2D(pool_size=(2, 2)),
+
+    Conv2D(64, (3, 3), activation='relu'),
+    MaxPooling2D(pool_size=(2, 2)),
+
+    Conv2D(128, (3, 3), activation='relu'),
+    MaxPooling2D(pool_size=(2, 2)),
+
+    Flatten(),
+    Dense(128, activation='relu'),
+    Dropout(0.5),
+    Dense(4, activation='softmax')  # 4 sınıf olduğu için output 4
+])
+
+model_cnn.compile(
+    optimizer=Adam(learning_rate=0.0001),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+history_cnn = model_cnn.fit(
+    train_generator,
+    epochs=10,  
+    validation_data=test_generator
+)
+
+
+#Bundan sonraki kodlar grafik oluşturmak için yazıldı.
+acc = history_cnn.history['accuracy']
+val_acc = history_cnn.history['val_accuracy']
+loss = history_cnn.history['loss']
+val_loss = history_cnn.history['val_loss']
+epochs = range(1, len(acc)+1)
+
+plt.figure(figsize=(14, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(epochs, acc, 'bo-', label='Eğitim Doğruluğu')
+plt.plot(epochs, val_acc, 'ro-', label='Doğrulama Doğruluğu')
+plt.title('Doğruluk Grafiği')
+plt.xlabel('Epoch')
+plt.ylabel('Doğruluk')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(epochs, loss, 'bo-', label='Eğitim Kaybı')
+plt.plot(epochs, val_loss, 'ro-', label='Doğrulama Kaybı')
+plt.title('Kayıp Grafiği')
+plt.xlabel('Epoch')
+plt.ylabel('Kayıp')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+test_generator.reset()
+predictions = model_cnn.predict(test_generator)
+predicted_classes = np.argmax(predictions, axis=1)
+true_classes = test_generator.classes
+class_labels = list(test_generator.class_indices.keys())
+
+# Confusion Matrix
+cm = confusion_matrix(true_classes, predicted_classes)
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_labels, yticklabels=class_labels)
+plt.title('Confusion Matrix')
+plt.xlabel('Tahmin Edilen')
+plt.ylabel('Gerçek')
+plt.show()
+
+# Classification report
+print(classification_report(true_classes, predicted_classes, target_names=class_labels))
